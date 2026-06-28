@@ -2,6 +2,7 @@ import os
 import time
 import pymysql
 from flask import Flask, request, jsonify, render_template_string
+from google.cloud import storage
 
 app = Flask(__name__)
 
@@ -438,6 +439,414 @@ def delete_user(user_id):
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# GCP Cloud Storage Browser UI Template
+GCP_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GCP Cloud Storage 瀏覽器</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Noto+Sans+TC:wght@300;400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --gcp-blue: #4285f4;
+            --gcp-red: #ea4335;
+            --gcp-yellow: #fbbc05;
+            --gcp-green: #34a853;
+            --text-color: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border-color: rgba(255, 255, 255, 0.1);
+            --success-color: #34a853;
+            --warning-color: #fbbc05;
+            --danger-color: #ea4335;
+        }
+        
+        body {
+            font-family: 'Inter', 'Noto Sans TC', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+            background-image: radial-gradient(circle at top right, rgba(66, 133, 244, 0.15), transparent),
+                              radial-gradient(circle at bottom left, rgba(52, 168, 83, 0.08), transparent);
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 650px;
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+        
+        h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-top: 0;
+            margin-bottom: 25px;
+            text-align: center;
+            background: linear-gradient(135deg, var(--gcp-blue), var(--gcp-green));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        .gcp-logo {
+            display: inline-flex;
+            gap: 3px;
+        }
+        .gcp-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        .dot-blue { background-color: var(--gcp-blue); }
+        .dot-red { background-color: var(--gcp-red); }
+        .dot-yellow { background-color: var(--gcp-yellow); }
+        .dot-green { background-color: var(--gcp-green); }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+        
+        .input-group {
+            display: flex;
+            gap: 10px;
+        }
+        
+        input {
+            flex: 1;
+            padding: 12px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-color);
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: var(--gcp-blue);
+            box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.2);
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            background-color: var(--gcp-blue);
+            color: white;
+        }
+        
+        .btn:hover {
+            background-color: #2b75eb;
+            transform: translateY(-1px);
+        }
+        
+        .divider {
+            height: 1px;
+            background: var(--border-color);
+            margin: 25px 0;
+        }
+        
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: var(--text-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .badge {
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-muted);
+        }
+        
+        .bucket-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            max-height: 350px;
+            overflow-y: auto;
+        }
+        
+        .bucket-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px;
+            background: rgba(15, 23, 42, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 10px;
+            transition: all 0.2s;
+        }
+        
+        .bucket-item:hover {
+            background: rgba(15, 23, 42, 0.6);
+            border-color: rgba(66, 133, 244, 0.3);
+            transform: translateX(2px);
+        }
+        
+        .bucket-icon {
+            font-size: 20px;
+        }
+        
+        .bucket-name {
+            font-weight: 600;
+            font-size: 15px;
+            word-break: break-all;
+        }
+        
+        .loader {
+            display: none;
+            text-align: center;
+            padding: 30px;
+            color: var(--text-muted);
+        }
+        
+        .loader-spinner {
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top: 3px solid var(--gcp-blue);
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            line-height: 1.5;
+            display: none;
+        }
+        
+        .alert-danger {
+            background: rgba(234, 67, 53, 0.1);
+            border: 1px solid rgba(234, 67, 53, 0.2);
+            color: #fca5a5;
+        }
+        
+        .alert-info {
+            background: rgba(66, 133, 244, 0.1);
+            border: 1px solid rgba(66, 133, 244, 0.2);
+            color: #93c5fd;
+        }
+        
+        .empty-state {
+            text-align: center;
+            color: var(--text-muted);
+            padding: 30px;
+            font-style: italic;
+        }
+        
+        .nav-links {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 20px;
+            font-size: 14px;
+        }
+        
+        .nav-links a {
+            color: var(--gcp-blue);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+        
+        .nav-links a:hover {
+            color: #2b75eb;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>
+            <span class="gcp-logo">
+                <span class="gcp-dot dot-blue"></span>
+                <span class="gcp-dot dot-red"></span>
+                <span class="gcp-dot dot-yellow"></span>
+                <span class="gcp-dot dot-green"></span>
+            </span>
+            GCS Bucket 瀏覽器
+        </h1>
+        
+        <div id="errorAlert" class="alert alert-danger"></div>
+        <div id="infoAlert" class="alert alert-info"></div>
+
+        <!-- Project ID Form -->
+        <div class="form-group">
+            <label for="projectId">GCP Project ID</label>
+            <div class="input-group">
+                <input type="text" id="projectId" placeholder="輸入專案 ID，例如：my-gcp-project-123" required>
+                <button class="btn" onclick="fetchBuckets()">查詢 Buckets</button>
+            </div>
+        </div>
+        
+        <div class="divider"></div>
+        
+        <!-- Buckets List -->
+        <div class="section-title">
+            <span>儲存貯體 (Buckets) 列表</span>
+            <span id="bucketCount" class="badge">0 個</span>
+        </div>
+        
+        <div id="loader" class="loader">
+            <div class="loader-spinner"></div>
+            <span>連線 GCP 查詢中，請稍候...</span>
+        </div>
+        
+        <ul id="bucketList" class="bucket-list">
+            <li class="empty-state">請在上方輸入 Project ID 並點擊查詢</li>
+        </ul>
+        
+        <div class="divider"></div>
+        
+        <div class="nav-links">
+            <a href="/user">👤 用戶管理系統</a>
+            <a href="/">🏠 回首頁</a>
+        </div>
+    </div>
+
+    <script>
+        // Check if there is a saved project ID in localStorage
+        document.getElementById('projectId').value = localStorage.getItem('saved_gcp_project_id') || '';
+
+        async function fetchBuckets() {
+            const projectId = document.getElementById('projectId').value.trim();
+            const errorAlert = document.getElementById('errorAlert');
+            const infoAlert = document.getElementById('infoAlert');
+            const loader = document.getElementById('loader');
+            const bucketList = document.getElementById('bucketList');
+            const bucketCount = document.getElementById('bucketCount');
+            
+            errorAlert.style.display = 'none';
+            infoAlert.style.display = 'none';
+            
+            if (!projectId) {
+                errorAlert.textContent = '請輸入 Project ID！';
+                errorAlert.style.display = 'block';
+                return;
+            }
+            
+            // Save project ID
+            localStorage.setItem('saved_gcp_project_id', projectId);
+            
+            // Show loader, clear list
+            loader.style.display = 'block';
+            bucketList.innerHTML = '';
+            bucketCount.textContent = '0 個';
+            
+            try {
+                const response = await fetch(`/gcp/buckets?project_id=${encodeURIComponent(projectId)}`);
+                const data = await response.json();
+                
+                loader.style.display = 'none';
+                
+                if (!response.ok) {
+                    throw new Error(data.message || '查詢失敗');
+                }
+                
+                const buckets = data.buckets || [];
+                bucketCount.textContent = `${buckets.length} 個`;
+                
+                if (buckets.length === 0) {
+                    bucketList.innerHTML = '<li class="empty-state">該專案內沒有任何 Cloud Storage Bucket</li>';
+                    return;
+                }
+                
+                buckets.forEach(bucketName => {
+                    const li = document.createElement('li');
+                    li.className = 'bucket-item';
+                    li.innerHTML = `
+                        <span class="bucket-icon">🪣</span>
+                        <span class="bucket-name">${bucketName}</span>
+                    `;
+                    bucketList.appendChild(li);
+                });
+                
+            } catch (error) {
+                loader.style.display = 'none';
+                errorAlert.innerHTML = `
+                    <strong>查詢出錯：</strong> ${error.message}
+                    <br><br>
+                    <small>💡 提示：請確認：<br>
+                    1. 專案 ID 是否正確。<br>
+                    2. 本地開發時，是否已執行 <code>gcloud auth application-default login</code>。<br>
+                    3. GCP 容器（若是跑在 GCP VM 上）是否綁定了具有 Storage Viewer 權限的服務帳號 (Service Account)。</small>
+                `;
+                errorAlert.style.display = 'block';
+                bucketList.innerHTML = '<li class="empty-state" style="color: var(--danger-color)">查詢發生錯誤</li>';
+            }
+        }
+    </script>
+</body>
+</html>
+"""
+
+# GCP Storage Buckets Route
+@app.route('/gcp')
+def gcp_page():
+    return render_template_string(GCP_TEMPLATE)
+
+@app.route('/gcp/buckets')
+def gcp_buckets():
+    project_id = request.args.get('project_id')
+    if not project_id:
+        return jsonify({"status": "error", "message": "Missing project_id parameter"}), 400
+    
+    try:
+        # Initialize Google Cloud Storage client
+        # Implicitly uses Application Default Credentials (ADC)
+        storage_client = storage.Client(project=project_id)
+        buckets = list(storage_client.list_buckets())
+        bucket_names = [bucket.name for bucket in buckets]
+        return jsonify({"status": "success", "buckets": bucket_names})
+    except Exception as e:
+        # Return friendly error message
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
+
 
