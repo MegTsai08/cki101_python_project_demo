@@ -9,3 +9,5 @@ venv
 ENV
 env
 .DS_Store
+db_data/
+

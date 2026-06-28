@@ -146,3 +146,6 @@ cython_debug/
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# Project database data directory
+db_data/
